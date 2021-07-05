@@ -1,31 +1,34 @@
 package com.cygnati.social_share_plugin;
 
-import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.FileProvider;
 
+import com.facebook.AccessToken;
 import com.facebook.CallbackManager;
 import com.facebook.FacebookCallback;
 import com.facebook.FacebookException;
+import com.facebook.login.LoginBehavior;
+import com.facebook.login.LoginManager;
+import com.facebook.login.LoginResult;
 import com.facebook.share.Sharer;
 import com.facebook.share.model.ShareLinkContent;
 import com.facebook.share.model.SharePhoto;
 import com.facebook.share.model.SharePhotoContent;
 import com.facebook.share.widget.ShareDialog;
+import com.twitter.sdk.android.tweetcomposer.TweetComposer;
 
 import java.io.File;
-import java.util.List;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.Collections;
 
-import io.flutter.embedding.engine.plugins.FlutterPlugin;
-import io.flutter.embedding.engine.plugins.activity.ActivityAware;
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
@@ -35,55 +38,62 @@ import io.flutter.plugin.common.PluginRegistry.Registrar;
 
 import static android.app.Activity.RESULT_CANCELED;
 import static android.app.Activity.RESULT_OK;
+import android.os.StrictMode;
 
 /**
  * SocialSharePlugin
  */
-public class SocialSharePlugin
-        implements FlutterPlugin, ActivityAware, MethodCallHandler, PluginRegistry.ActivityResultListener {
+public class SocialSharePlugin implements MethodCallHandler, PluginRegistry.ActivityResultListener {
     private final static String INSTAGRAM_PACKAGE_NAME = "com.instagram.android";
     private final static String FACEBOOK_PACKAGE_NAME = "com.facebook.katana";
     private final static String TWITTER_PACKAGE_NAME = "com.twitter.android";
+    private final static String WHATSAPP_PACKAGE_NAME = "com.whatsapp";
 
     private final static int TWITTER_REQUEST_CODE = 0xc0ce;
-    private final static int INSTAGRAM_REQUEST_CODE = 0xc0c3;
 
-    private Activity activity;
-    private MethodChannel channel;
+    private final Registrar registrar;
+    private final MethodChannel channel;
     private final CallbackManager callbackManager;
+    private final LoginManager loginManager;
 
-    public SocialSharePlugin() {
+    private Result result;
+    private String quote;
+    private String url;
+
+    private SocialSharePlugin(final Registrar registrar, final MethodChannel channel) {
+        this.channel = channel;
+        this.registrar = registrar;
         this.callbackManager = CallbackManager.Factory.create();
-    }
+        this.loginManager = LoginManager.getInstance();
+        this.loginManager.registerCallback(callbackManager, new FacebookCallback<LoginResult>() {
+            @Override
+            public void onSuccess(LoginResult loginResult) {
+                Log.d("SocialSharePlugin", "Facebook logged in.");
+                if (result != null) {
+                    facebookShareLink(quote, url, loginResult.getAccessToken().getToken());
+                    result.success(true);
+                    result = null;
+                }
+            }
 
-    @Override
-    public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
-        this.channel = new MethodChannel(binding.getBinaryMessenger(), "social_share_plugin");
-        channel.setMethodCallHandler(this);
-    }
+            @Override
+            public void onCancel() {
+                Log.d("SocialSharePlugin", "Facebook login cancelled.");
+                channel.invokeMethod("onCancel", null);
+                result.success(false);
+                result = null;
+            }
 
-    @Override
-    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-    }
+            @Override
+            public void onError(FacebookException error) {
+                Log.d("SocialSharePlugin", error.getMessage());
+                channel.invokeMethod("onError", error.getMessage());
+                result.success(false);
+                result = null;
+            }
+        });
 
-    @Override
-    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
-        binding.addActivityResultListener(this);
-        this.activity = binding.getActivity();
-    }
-
-    @Override
-    public void onDetachedFromActivityForConfigChanges() {
-    }
-
-    @Override
-    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
-        binding.removeActivityResultListener(this);
-        binding.addActivityResultListener(this);
-    }
-
-    @Override
-    public void onDetachedFromActivity() {
+        this.registrar.addActivityResultListener(this);
     }
 
     /**
@@ -91,17 +101,15 @@ public class SocialSharePlugin
      */
     public static void registerWith(Registrar registrar) {
         final MethodChannel channel = new MethodChannel(registrar.messenger(), "social_share_plugin");
-        final SocialSharePlugin plugin = new SocialSharePlugin();
-        plugin.channel = channel;
-        plugin.activity = registrar.activity();
-        channel.setMethodCallHandler(plugin);
+        channel.setMethodCallHandler(new SocialSharePlugin(registrar, channel));
     }
 
     @Override
     public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
+        Log.d("SocialSharePlugin", "onActivityResult");
         if (requestCode == TWITTER_REQUEST_CODE) {
             if (resultCode == RESULT_OK) {
-                Log.d("SocialSharePlugin", "Twitter share done.");
+                Log.d("SocialSharePlugin", "Twitter done.");
                 channel.invokeMethod("onSuccess", null);
             } else if (resultCode == RESULT_CANCELED) {
                 Log.d("SocialSharePlugin", "Twitter cancelled.");
@@ -112,62 +120,93 @@ public class SocialSharePlugin
             return true;
         }
 
-        if (requestCode == INSTAGRAM_REQUEST_CODE) {
-            if (resultCode == RESULT_OK) {
-                Log.d("SocialSharePlugin", "Instagram share done.");
-                channel.invokeMethod("onSuccess", null);
-            } else {
-                Log.d("SocialSharePlugin", "Instagram share failed.");
-                channel.invokeMethod("onCancel", null);
-            }
-
-            return true;
-        }
-
         return callbackManager.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
-        final PackageManager pm = activity.getPackageManager();
+        final PackageManager pm = registrar.activeContext().getPackageManager();
         switch (call.method) {
             case "getPlatformVersion":
                 result.success("Android " + android.os.Build.VERSION.RELEASE);
                 break;
             case "shareToFeedInstagram":
                 try {
+                    StrictMode.VmPolicy.Builder builder = new StrictMode.VmPolicy.Builder();
+                    StrictMode.setVmPolicy(builder.build());
                     pm.getPackageInfo(INSTAGRAM_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
                     instagramShare(call.<String>argument("type"), call.<String>argument("path"));
-                    result.success(true);
                 } catch (PackageManager.NameNotFoundException e) {
                     openPlayStore(INSTAGRAM_PACKAGE_NAME);
-                    result.success(false);
                 }
+
+                result.success(null);
                 break;
+
+            case "shareTextToFeedInstagram":
+                try {
+                    pm.getPackageInfo(INSTAGRAM_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
+                    instagramShareText(call.<String>argument("textMsg"));
+                } catch (PackageManager.NameNotFoundException e) {
+                    openPlayStore(INSTAGRAM_PACKAGE_NAME);
+                }
+                result.success(null);
+                break;
+
             case "shareToFeedFacebook":
                 try {
                     pm.getPackageInfo(FACEBOOK_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
                     facebookShare(call.<String>argument("caption"), call.<String>argument("path"));
-                    result.success(true);
                 } catch (PackageManager.NameNotFoundException e) {
                     openPlayStore(FACEBOOK_PACKAGE_NAME);
-                    result.success(false);
+                }
+
+                result.success(null);
+                break;
+            case "shareToWhatsapp":
+                try{
+                    StrictMode.VmPolicy.Builder builder = new StrictMode.VmPolicy.Builder();
+                    StrictMode.setVmPolicy(builder.build());
+                    pm.getPackageInfo(WHATSAPP_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
+                    whatsappShare(call.<String>argument("type"), call.<String>argument("path"), call.<String>argument("textMsg"));
+                } catch(PackageManager.NameNotFoundException e) {
+                    openPlayStore(WHATSAPP_PACKAGE_NAME);
                 }
                 break;
+
+            case "shareTextToWhatsapp":
+                try{
+                    pm.getPackageInfo(WHATSAPP_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
+                    whatsappShareText(call.<String>argument("textMsg"));
+                } catch(PackageManager.NameNotFoundException e) {
+                    openPlayStore(WHATSAPP_PACKAGE_NAME);
+                }
+                break;
+
             case "shareToFeedFacebookLink":
                 try {
+                    AccessToken accessToken = AccessToken.getCurrentAccessToken();
+                    boolean isLoggedIn = accessToken != null && !accessToken.isExpired();
                     pm.getPackageInfo(FACEBOOK_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
-                    facebookShareLink(call.<String>argument("quote"), call.<String>argument("url"));
-                    result.success(true);
+                    if (isLoggedIn) {
+                        facebookShareLink(call.<String>argument("quote"), call.<String>argument("url"), accessToken.getToken());
+                        result.success(true);
+                    } else {
+                        this.result = result;
+                        this.quote = call.argument("quote");
+                        this.url = call.argument("url");
+                        this.loginManager.setLoginBehavior(LoginBehavior.NATIVE_WITH_FALLBACK);
+                        this.loginManager.logInWithReadPermissions(registrar.activity(), Collections.singletonList("email"));
+                    }
                 } catch (PackageManager.NameNotFoundException e) {
                     openPlayStore(FACEBOOK_PACKAGE_NAME);
                     result.success(false);
                 }
                 break;
-            case "shareToTwitterLink":
+            case "shareToTwitter":
                 try {
                     pm.getPackageInfo(TWITTER_PACKAGE_NAME, PackageManager.GET_ACTIVITIES);
-                    twitterShareLink(call.<String>argument("text"), call.<String>argument("url"));
+                    twitterShare(call.<String>argument("text"), call.<String>argument("url"));
                     result.success(true);
                 } catch (PackageManager.NameNotFoundException e) {
                     openPlayStore(TWITTER_PACKAGE_NAME);
@@ -181,79 +220,91 @@ public class SocialSharePlugin
     }
 
     private void openPlayStore(String packageName) {
+        final Context context = registrar.activeContext();
         try {
             final Uri playStoreUri = Uri.parse("market://details?id=" + packageName);
             final Intent intent = new Intent(Intent.ACTION_VIEW, playStoreUri);
-            activity.startActivity(intent);
+            context.startActivity(intent);
         } catch (ActivityNotFoundException e) {
             final Uri playStoreUri = Uri.parse("https://play.google.com/store/apps/details?id=" + packageName);
             final Intent intent = new Intent(Intent.ACTION_VIEW, playStoreUri);
-            activity.startActivity(intent);
+            context.startActivity(intent);
         }
     }
 
     private void instagramShare(String type, String imagePath) {
+        final Context context = registrar.activeContext();
         final File image = new File(imagePath);
-        final Uri uri = FileProvider.getUriForFile(activity, activity.getPackageName() + ".social.share.fileprovider",
-                image);
+        final Uri uri = Uri.fromFile(image);
+//        final Uri uri = FileProvider.getUriForFile(context,
+//                context.getApplicationContext().getPackageName() + ".social.share.fileprovider", image);
         final Intent share = new Intent(Intent.ACTION_SEND);
         share.setType(type);
-        share.putExtra(Intent.EXTRA_STREAM, uri);
         share.setPackage(INSTAGRAM_PACKAGE_NAME);
         share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        share.putExtra(Intent.EXTRA_STREAM, uri);
+        context.startActivity(share);
+    }
 
-        final Intent chooser = Intent.createChooser(share, "Share to");
-        final List<ResolveInfo> resInfoList = activity.getPackageManager().queryIntentActivities(chooser,
-                PackageManager.MATCH_DEFAULT_ONLY);
+    private void whatsappShare(String type, String imagePath, String text) {
+        final Context context = registrar.activeContext();
+        final File image = new File(imagePath);
+        Uri uri = Uri.fromFile(image);
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType("*/*");
+        share.setPackage(WHATSAPP_PACKAGE_NAME);
+        share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        share.putExtra(Intent.EXTRA_STREAM,uri);
+        share.putExtra(Intent.EXTRA_TEXT, text);
 
-        for (ResolveInfo resolveInfo : resInfoList) {
-            final String packageName = resolveInfo.activityInfo.packageName;
-            activity.grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        }
+        context.startActivity(share);
+    }
 
-        activity.startActivityForResult(chooser, INSTAGRAM_REQUEST_CODE);
+    private  void instagramShareText(String textMsg) {
+
+        final Context context = registrar.activeContext();
+        final Intent share = new Intent(Intent.ACTION_SEND);
+        share .putExtra(Intent.EXTRA_TEXT, textMsg);
+        share .setType("text/plain");
+        share .setPackage(INSTAGRAM_PACKAGE_NAME);
+        context.startActivity(share);
+
     }
 
     private void facebookShare(String caption, String mediaPath) {
         final File media = new File(mediaPath);
-        final Uri uri = FileProvider.getUriForFile(activity, activity.getPackageName() + ".social.share.fileprovider",
-                media);
+        final Uri uri = Uri.fromFile(media);
         final SharePhoto photo = new SharePhoto.Builder().setImageUrl(uri).setCaption(caption).build();
         final SharePhotoContent content = new SharePhotoContent.Builder().addPhoto(photo).build();
-        final ShareDialog shareDialog = new ShareDialog(activity);
-        shareDialog.registerCallback(callbackManager, new FacebookCallback<Sharer.Result>() {
-            @Override
-            public void onSuccess(Sharer.Result result) {
-                channel.invokeMethod("onSuccess", null);
-                Log.d("SocialSharePlugin", "Sharing successfully done.");
-            }
-
-            @Override
-            public void onCancel() {
-                channel.invokeMethod("onCancel", null);
-                Log.d("SocialSharePlugin", "Sharing cancelled.");
-            }
-
-            @Override
-            public void onError(FacebookException error) {
-                channel.invokeMethod("onError", error.getMessage());
-                Log.d("SocialSharePlugin", "Sharing error occurred.");
-            }
-        });
+        final ShareDialog shareDialog = new ShareDialog(registrar.activity());
 
         if (ShareDialog.canShow(SharePhotoContent.class)) {
             shareDialog.show(content);
         }
     }
 
-    private void facebookShareLink(String quote, String url) {
+
+    private void whatsappShareText(String textMsg) {
+
+        final Context context = registrar.activeContext();
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType("text/plain");
+        share.setPackage(WHATSAPP_PACKAGE_NAME);
+        share.putExtra(Intent.EXTRA_TEXT, textMsg);
+
+        context.startActivity(share);
+
+    }
+
+    private void facebookShareLink(String quote, String url, final String token) {
         final Uri uri = Uri.parse(url);
-        final ShareLinkContent content = new ShareLinkContent.Builder().setContentUrl(uri).setQuote(quote).build();
-        final ShareDialog shareDialog = new ShareDialog(activity);
+        final ShareLinkContent content = new ShareLinkContent.Builder()
+                .setContentUrl(uri).setQuote(quote).build();
+        final ShareDialog shareDialog = new ShareDialog(registrar.activity());
         shareDialog.registerCallback(callbackManager, new FacebookCallback<Sharer.Result>() {
             @Override
             public void onSuccess(Sharer.Result result) {
-                channel.invokeMethod("onSuccess", null);
+                channel.invokeMethod("onSuccess", token);
                 Log.d("SocialSharePlugin", "Sharing successfully done.");
             }
 
@@ -275,9 +326,18 @@ public class SocialSharePlugin
         }
     }
 
-    private void twitterShareLink(String text, String url) {
-        final String tweetUrl = String.format("https://twitter.com/intent/tweet?text=%s&url=%s", text, url);
-        final Uri uri = Uri.parse(tweetUrl);
-        activity.startActivityForResult(new Intent(Intent.ACTION_VIEW, uri), TWITTER_REQUEST_CODE);
+    private void twitterShare(String text, String url) {
+        try {
+            TweetComposer.Builder builder = new TweetComposer
+                    .Builder(registrar.activity()).text(text);
+            if (url != null && url.length() > 0) {
+                builder.url(new URL(url));
+            }
+
+            final Intent intent = builder.createIntent();
+            registrar.activity().startActivityForResult(intent, TWITTER_REQUEST_CODE);
+        } catch (MalformedURLException e) {
+            e.printStackTrace();
+        }
     }
 }
