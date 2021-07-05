@@ -58,27 +58,31 @@ class _MyAppState extends State<MyApp> {
               child: Text('Share to Instagram'),
               onPressed: () async {
                 File file = await ImagePicker.pickImage(source: ImageSource.gallery);
-                await SocialSharePlugin.shareToFeedInstagram(path: file.path);
+                await SocialSharePlugin.shareToFeedInstagram("image/*", file.path);
+              },
+            ),
+            RaisedButton(
+              child: Text('Share text to Instagram'),
+              onPressed: () async {
+                await SocialSharePlugin.shareTextToFeedInstagram("test for instagarm");
               },
             ),
             RaisedButton(
               child: Text('Share to Facebook'),
               onPressed: () async {
                 File file = await ImagePicker.pickImage(source: ImageSource.gallery);
-                await SocialSharePlugin.shareToFeedFacebook(
-                    path: file.path,
-                    onSuccess: (_) {
-                      print('FACEBOOK SUCCESS');
-                      return;
-                    },
-                    onCancel: () {
-                      print('FACEBOOK CANCELLED');
-                      return;
-                    },
-                    onError: (error) {
-                      print('FACEBOOK ERROR $error');
-                      return;
-                    });
+                await SocialSharePlugin.shareToFeedFacebook('test', file.path);
+              },
+            ),
+            RaisedButton(
+              child: Text('Share text to whatsapp'),
+              onPressed: () async {
+                try {
+                  await SocialSharePlugin.shareTextToWhatsapp(
+                      "test for whatsapp");
+                } catch(_) {
+                  print(_);
+                }
               },
             ),
             RaisedButton(
@@ -90,8 +94,8 @@ class _MyAppState extends State<MyApp> {
                 final result = await SocialSharePlugin.shareToFeedFacebookLink(
                   quote: quote,
                   url: url,
-                  onSuccess: (_) {
-                    print('FACEBOOK SUCCESS');
+                  onSuccess: (postId) {
+                    print('FACEBOOK SUCCESS $postId');
                     return;
                   },
                   onCancel: () {
@@ -113,7 +117,7 @@ class _MyAppState extends State<MyApp> {
                 String url = 'https://flutter.dev/';
                 final text =
                     'Flutter is Google’s portable UI toolkit for building beautiful, natively-compiled applications for mobile, web, and desktop from a single codebase.';
-                final result = await SocialSharePlugin.shareToTwitterLink(
+                final result = await SocialSharePlugin.shareToTwitter(
                     text: text,
                     url: url,
                     onSuccess: (_) {

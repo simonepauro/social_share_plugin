@@ -48,26 +48,14 @@ Then you'll just have to copy-paste the following to your _Android Manifest_ and
 <meta-data android:name="com.facebook.sdk.ApplicationId"
     android:value="@string/facebook_app_id"/>
 
-<meta-data android:name="com.facebook.sdk.ApplicationName"
-            android:value="@string/app_name"/>
-
 <activity android:name="com.facebook.FacebookActivity"
     android:configChanges=
             "keyboard|keyboardHidden|screenLayout|screenSize|orientation"
     android:label="@string/app_name" />
     
-<provider android:authorities="com.facebook.app.FacebookContentProvider{FACEBOOK_APP_ID}"
+<provider android:authorities="com.facebook.app.FacebookContentProvider{APP_ID}"
             android:name="com.facebook.FacebookContentProvider"
             android:exported="true"/>
-
-<provider android:name="androidx.core.content.FileProvider"
-            android:authorities="{APP_PACKAGE}.social.share.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths"/>
-        </provider>
 ```
 
 Done!
@@ -116,7 +104,6 @@ Once you have the Facebook App ID figured out, then you'll just have to copy-pas
     <string>fb-messenger-share-api</string>
     <string>fbauth2</string>
     <string>fbshareextension</string>
-    <string>twitter</string>
 </array>
 ```
 
@@ -129,7 +116,7 @@ Done!
 import 'package:social_share_plugin/social_share_plugin.dart';
 
 File file = await ImagePicker.pickImage(source: ImageSource.gallery);
-await SocialSharePlugin.shareToFeedInstagram(path: file.path);
+await SocialSharePlugin.shareToFeedInstagram("image/*", file.path);
 ```
 
 ### Facebook
@@ -137,16 +124,7 @@ await SocialSharePlugin.shareToFeedInstagram(path: file.path);
 import 'package:social_share_plugin/social_share_plugin.dart';
 
 File file = await ImagePicker.pickImage(source: ImageSource.gallery);
-await SocialSharePlugin.shareToFeedFacebook(path: file.path);
-
-await SocialSharePlugin.shareToFeedFacebookLink(quote: 'quote', url: 'https://flutter.dev');
-```
-
-### Twitter
-```dart
-import 'package:social_share_plugin/social_share_plugin.dart';
-
-await SocialSharePlugin.shareToTwitterLink(text: 'text', url: 'https://flutter.dev');
+await SocialSharePlugin.shareToFeedFacebook('caption', file.path);
 ```
 
 That's it.
